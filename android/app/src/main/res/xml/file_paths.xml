@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Akses folder khusus aplikasi -->
+    <external-files-path
+        name="external_files"
+        path="." />
+
+    <!-- Kalau mau langsung ke Downloads (Android 11+ masih lewat SAF/MediaStore) -->
+    <external-path
+        name="download"
+        path="Download/" />
+</paths>
