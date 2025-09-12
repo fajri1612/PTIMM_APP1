@@ -5,17 +5,17 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 class KeuanganService {
   static const String boxName = 'transaksiBox';
-  static Box get _box => Hive.box('transaksiBox');
+  static Box get _box => Hive.box(boxName);
 
   // 🔥 Notifier untuk progress sync
   static final ValueNotifier<bool> isSyncing = ValueNotifier(false);
 
   // Listenable untuk auto-refresh UI
-  static ValueListenable<Box> listenable() {
-    return _box.listenable();
-  }
+  static ValueListenable<Box> listenable() => _box.listenable();
 
-  // Tambah transaksi baru (offline-first)
+  // =============================
+  // Tambah transaksi (offline-first)
+  // =============================
   static Future<void> addTransaksi({
     required String jenis,
     required String namaPT,
@@ -31,7 +31,7 @@ class KeuanganService {
       'noPO': noPO,
       'jumlah': jumlah,
       'tanggal': tanggal.toIso8601String(),
-      'unsynced': true, // default: offline dulu
+      'unsynced': true,
     };
 
     final index = await _box.add(data);
@@ -44,70 +44,154 @@ class KeuanganService {
             .doc(user.uid)
             .collection("keuangan")
             .add({
-          'jenis': jenis,
-          'namaPT': namaPT,
-          'deskripsi': deskripsi,
-          'noPO': noPO,
-          'jumlah': jumlah,
-          'tanggal': tanggal.toIso8601String(),
+          ...data,
           'createdAt': FieldValue.serverTimestamp(),
         });
 
-        // update Hive -> sudah tersinkron
         final updated = Map<String, dynamic>.from(_box.getAt(index));
         updated['unsynced'] = false;
         updated['remoteId'] = doc.id;
         await _box.putAt(index, updated);
       }
     } catch (e) {
-      debugPrint("Gagal upload ke Firestore, simpan offline: $e");
+      debugPrint("Gagal upload ke Firestore: $e");
     }
   }
 
-  // Sinkronisasi otomatis (push unsynced -> Firestore)
+  // =============================
+  // Update transaksi
+  // =============================
+  static Future<void> updateTransaksi(int index, Map<String, dynamic> newData) async {
+    final existing = Map<String, dynamic>.from(_box.getAt(index));
+    final updated = {
+      ...existing,
+      ...newData,
+      'unsynced': true, // tandai perlu sync
+    };
+
+    await _box.putAt(index, updated);
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null && updated['remoteId'] != null) {
+        await FirebaseFirestore.instance
+            .collection("users")
+            .doc(user.uid)
+            .collection("keuangan")
+            .doc(updated['remoteId'])
+            .update({
+          'jenis': updated['jenis'],
+          'namaPT': updated['namaPT'],
+          'deskripsi': updated['deskripsi'],
+          'noPO': updated['noPO'],
+          'jumlah': updated['jumlah'],
+          'tanggal': updated['tanggal'],
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        updated['unsynced'] = false;
+        await _box.putAt(index, updated);
+      }
+    } catch (e) {
+      debugPrint("Gagal update Firestore: $e");
+    }
+  }
+
+  // =============================
+  // Hapus transaksi
+  // =============================
+  static Future<void> deleteTransaksi(int index) async {
+    final data = Map<String, dynamic>.from(_box.getAt(index));
+
+    await _box.deleteAt(index);
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null && data['remoteId'] != null) {
+        await FirebaseFirestore.instance
+            .collection("users")
+            .doc(user.uid)
+            .collection("keuangan")
+            .doc(data['remoteId'])
+            .delete();
+      }
+    } catch (e) {
+      debugPrint("Gagal hapus Firestore: $e");
+    }
+  }
+
+  // =============================
+  // Sinkronisasi offline → online
+  // =============================
   static Future<void> syncOfflineData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    isSyncing.value = true; // 🚀 mulai sync
+    isSyncing.value = true;
 
     for (int i = 0; i < _box.length; i++) {
-      final data = _box.getAt(i);
-      if (data is Map && data['unsynced'] == true) {
-        try {
-          final doc = await FirebaseFirestore.instance
-              .collection("users")
-              .doc(user.uid)
-              .collection("keuangan")
-              .add({
-            'jenis': data['jenis'],
-            'namaPT': data['namaPT'],
-            'deskripsi': data['deskripsi'],
-            'noPO': data['noPO'],
-            'jumlah': data['jumlah'],
-            'tanggal': data['tanggal'],
-            'createdAt': FieldValue.serverTimestamp(),
-          });
+      final raw = _box.getAt(i);
+      if (raw is! Map) continue;
+      final data = Map<String, dynamic>.from(raw);
 
-          // update status di Hive
-          final updated = Map<String, dynamic>.from(data);
-          updated['unsynced'] = false;
-          updated['remoteId'] = doc.id;
-          await _box.putAt(i, updated);
+      if (data['unsynced'] == true) {
+        try {
+          if (data['remoteId'] != null) {
+            // 🔄 Update ke Firestore
+            await FirebaseFirestore.instance
+                .collection("users")
+                .doc(user.uid)
+                .collection("keuangan")
+                .doc(data['remoteId'])
+                .set({
+              'jenis': data['jenis'],
+              'namaPT': data['namaPT'],
+              'deskripsi': data['deskripsi'],
+              'noPO': data['noPO'],
+              'jumlah': data['jumlah'],
+              'tanggal': data['tanggal'],
+              'updatedAt': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
+          } else {
+            // ➕ Tambah baru ke Firestore
+            final doc = await FirebaseFirestore.instance
+                .collection("users")
+                .doc(user.uid)
+                .collection("keuangan")
+                .add({
+              'jenis': data['jenis'],
+              'namaPT': data['namaPT'],
+              'deskripsi': data['deskripsi'],
+              'noPO': data['noPO'],
+              'jumlah': data['jumlah'],
+              'tanggal': data['tanggal'],
+              'createdAt': FieldValue.serverTimestamp(),
+            });
+            data['remoteId'] = doc.id;
+          }
+
+          data['unsynced'] = false;
+          await _box.putAt(i, data);
         } catch (e) {
-          debugPrint("Sync gagal untuk index $i: $e");
+          debugPrint("Sync gagal index $i: $e");
         }
       }
     }
 
-    isSyncing.value = false; // ✅ selesai sync
+    isSyncing.value = false;
   }
 
-  // Ambil semua transaksi dari Hive
+  // =============================
+  // Ambil semua transaksi
+  // =============================
   static List<Map<String, dynamic>> getAllTransaksi() {
-    return _box.values.map<Map<String, dynamic>>((e) {
-      final map = Map<String, dynamic>.from(e as Map);
+    return List.generate(_box.length, (i) {
+      final raw = _box.getAt(i);
+      if (raw is! Map) return {};
+      final map = Map<String, dynamic>.from(raw);
+
       return {
+        'id': i,
         'jenis': map['jenis'] ?? 'Pemasukan',
         'namaPT': map['namaPT'] ?? 'Tanpa Nama',
         'deskripsi': map['deskripsi'] ?? '-',
@@ -117,36 +201,19 @@ class KeuanganService {
         'unsynced': map['unsynced'] ?? false,
         'remoteId': map['remoteId'],
       };
-    }).toList();
+    });
   }
 
-  // Hitung total pemasukan
-  static double getTotalPemasukan() {
-    return getAllTransaksi()
-        .where((t) => t['jenis'] == 'Pemasukan')
-        .fold(0.0, (sum, t) => sum + (t['jumlah'] ?? 0.0));
-  }
+  // =============================
+  // Utility
+  // =============================
+  static double getTotalPemasukan() => getAllTransaksi()
+      .where((t) => t['jenis'] == 'Pemasukan')
+      .fold(0.0, (sum, t) => sum + (t['jumlah'] ?? 0.0));
 
-  // Hitung total pengeluaran
-  static double getTotalPengeluaran() {
-    return getAllTransaksi()
-        .where((t) => t['jenis'] == 'Pengeluaran')
-        .fold(0.0, (sum, t) => sum + (t['jumlah'] ?? 0.0));
-  }
+  static double getTotalPengeluaran() => getAllTransaksi()
+      .where((t) => t['jenis'] == 'Pengeluaran')
+      .fold(0.0, (sum, t) => sum + (t['jumlah'] ?? 0.0));
 
-  // Hitung saldo
-  static double getSaldo() {
-    return getTotalPemasukan() - getTotalPengeluaran();
-  }
-
-  // Hapus transaksi berdasarkan index
-  static Future<void> deleteTransaksi(int index) async {
-    await _box.deleteAt(index);
-  }
-
-  // Update transaksi
-  static Future<void> updateTransaksi(
-      int index, Map<String, dynamic> data) async {
-    await _box.putAt(index, data);
-  }
+  static double getSaldo() => getTotalPemasukan() - getTotalPengeluaran();
 }

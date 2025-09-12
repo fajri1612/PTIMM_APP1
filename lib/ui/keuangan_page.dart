@@ -169,6 +169,14 @@ class _KeuanganPageState extends State<KeuanganPage> {
                       const pw.BoxDecoration(color: PdfColors.blue),
                   cellAlignment: pw.Alignment.centerLeft,
                   cellStyle: const pw.TextStyle(fontSize: 10),
+                  columnWidths: {
+                    0: const pw.FixedColumnWidth(75),
+                    1: const pw.FixedColumnWidth(70),
+                    2: const pw.FixedColumnWidth(100),
+                    3: const pw.FlexColumnWidth(),
+                    4: const pw.FixedColumnWidth(60),
+                    5: const pw.FixedColumnWidth(110),
+                  },
                 ),
 
                 pw.SizedBox(height: 20),
@@ -220,7 +228,8 @@ class _KeuanganPageState extends State<KeuanganPage> {
             : DateTime.tryParse(t['tanggal'].toString()) ?? DateTime.now();
         final jumlah = (t['jumlah'] as num).toDouble();
 
-        sheet.getRangeByIndex(i + 2, 1)
+        sheet
+            .getRangeByIndex(i + 2, 1)
             .setText(DateFormat("dd/MM/yyyy").format(tanggal));
         sheet.getRangeByIndex(i + 2, 2).setText(t['jenis'] ?? '');
         sheet.getRangeByIndex(i + 2, 3).setText(t['namaPT'] ?? '');
@@ -316,19 +325,17 @@ class _KeuanganPageState extends State<KeuanganPage> {
                         transaksi = transaksi.where((t) {
                           final tanggal = t['tanggal'] is DateTime
                               ? t['tanggal']
-                              : DateTime.tryParse(
-                                      t['tanggal'].toString()) ??
+                              : DateTime.tryParse(t['tanggal'].toString()) ??
                                   DateTime.now();
-                          return tanggal
-                              .isAfter(filterStart!.subtract(const Duration(days: 1)));
+                          return tanggal.isAfter(
+                              filterStart!.subtract(const Duration(days: 1)));
                         }).toList();
                       }
                       if (filterEnd != null) {
                         transaksi = transaksi.where((t) {
                           final tanggal = t['tanggal'] is DateTime
                               ? t['tanggal']
-                              : DateTime.tryParse(
-                                      t['tanggal'].toString()) ??
+                              : DateTime.tryParse(t['tanggal'].toString()) ??
                                   DateTime.now();
                           return tanggal
                               .isBefore(filterEnd!.add(const Duration(days: 1)));
@@ -553,8 +560,8 @@ class _KeuanganPageState extends State<KeuanganPage> {
       itemCount: transaksi.length,
       itemBuilder: (context, index) {
         final t = transaksi[index];
-        final isPemasukan = t['jenis'] == "Pemasukan";
-        final jumlah = (t['jumlah'] as num).toDouble();
+        //final isPemasukan = t['jenis'] == "Pemasukan";
+        //final jumlah = (t['jumlah'] as num).toDouble();
         final tanggal = t['tanggal'] is DateTime
             ? t['tanggal']
             : DateTime.tryParse(t['tanggal'].toString()) ?? DateTime.now();
@@ -570,16 +577,9 @@ class _KeuanganPageState extends State<KeuanganPage> {
             title: Text("${t['namaPT']} - ${t['jenis']}"),
             subtitle: Text(
                 "${DateFormat("dd/MM/yyyy").format(tanggal)}\n${t['deskripsi'] ?? ''}"),
-            trailing: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  NumberFormat.currency(locale: 'id', symbol: "Rp ")
-                      .format(jumlah),
-                  style: TextStyle(
-                      color: isPemasukan ? Colors.green : Colors.red,
-                      fontWeight: FontWeight.bold),
-                ),
                 IconButton(
                   icon: const Icon(Icons.receipt_long),
                   tooltip: "Lihat Invoice",
@@ -590,7 +590,40 @@ class _KeuanganPageState extends State<KeuanganPage> {
                           builder: (_) => InvoicePage(transaksi: t)),
                     );
                   },
-                )
+                ),
+                IconButton(
+                  icon: const Icon(Icons.edit, color: Colors.blue),
+                  tooltip: "Edit",
+                  onPressed: () {
+                    _showEditDialog(t);
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  tooltip: "Hapus",
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text("Hapus Transaksi"),
+                        content: const Text("Yakin ingin menghapus transaksi ini?"),
+                        actions: [
+                          TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text("Batal")),
+                          ElevatedButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text("Hapus")),
+                        ],
+                      ),
+                    );
+                    if (confirm == true) {
+                      await KeuanganService.deleteTransaksi(t['id']);
+                      _showSnack("Transaksi berhasil dihapus");
+                      setState(() {});
+                    }
+                  },
+                ),
               ],
             ),
           ),
@@ -602,100 +635,163 @@ class _KeuanganPageState extends State<KeuanganPage> {
   // ======================================
   // DATA TABLE
   // ======================================
-  Widget _buildDataTable(BuildContext context, List<Map<String, dynamic>> transaksi) {
-  return LayoutBuilder(
-    builder: (context, constraints) {
-      // Ambil total lebar layar
-      final double totalWidth = constraints.maxWidth;
+  Widget _buildDataTable(
+      BuildContext context, List<Map<String, dynamic>> transaksi) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double totalWidth = constraints.maxWidth;
 
-      // Tentukan lebar relatif untuk setiap kolom
-      final double tanggalWidth = totalWidth * 0.12;
-      final double jenisWidth = totalWidth * 0.1;
-      final double namaPTWidth = totalWidth * 0.15;
-      final double deskripsiWidth = totalWidth * 0.2;
-      final double noPOWidth = totalWidth * 0.13;
-      final double jumlahWidth = totalWidth * 0.15;
-      final double invoiceWidth = totalWidth * 0.15;
+        final double tanggalWidth = totalWidth * 0.12;
+        final double jenisWidth = totalWidth * 0.1;
+        final double namaPTWidth = totalWidth * 0.15;
+        final double deskripsiWidth = totalWidth * 0.2;
+        final double noPOWidth = totalWidth * 0.13;
+        final double jumlahWidth = totalWidth * 0.15;
+        final double invoiceWidth = totalWidth * 0.25; // diperbesar utk 3 tombol
 
-      return SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minWidth: MediaQuery.of(context).size.width, maxWidth: 1200,),
-          
-          child: DataTable(
-            columnSpacing: 12,
-            columns: const [
-              DataColumn(label: Text("Tanggal")),
-              DataColumn(label: Text("Jenis")),
-              DataColumn(label: Text("Nama PT")),
-              DataColumn(label: Text("Deskripsi")),
-              DataColumn(label: Text("No.PO")),
-              DataColumn(label: Text("Jumlah")),
-              DataColumn(label: Text("Invoice")),
-            ],
-            rows: transaksi.map((t) {
-              final isPemasukan = t['jenis'] == "Pemasukan";
-              final jumlah = (t['jumlah'] as num).toDouble();
-              final tanggal = t['tanggal'] is DateTime
-                  ? t['tanggal']
-                  : DateTime.tryParse(t['tanggal'].toString()) ?? DateTime.now();
-              final bool unsynced = t['unsynced'] == true;
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minWidth: MediaQuery.of(context).size.width,
+              maxWidth: 1200,
+            ),
+            child: DataTable(
+              columnSpacing: 12,
+              columns: const [
+                DataColumn(label: Text("Tanggal")),
+                DataColumn(label: Text("Jenis")),
+                DataColumn(label: Text("Nama PT")),
+                DataColumn(label: Text("Deskripsi")),
+                DataColumn(label: Text("No.PO")),
+                DataColumn(label: Text("Jumlah")),
+                DataColumn(label: Text("Aksi")),
+              ],
+              rows: transaksi.map((t) {
+                final isPemasukan = t['jenis'] == "Pemasukan";
+                final jumlah = (t['jumlah'] as num).toDouble();
+                final tanggal = t['tanggal'] is DateTime
+                    ? t['tanggal']
+                    : DateTime.tryParse(t['tanggal'].toString()) ??
+                        DateTime.now();
+                final bool unsynced = t['unsynced'] == true;
 
-              return DataRow(
-                cells: [
-                  DataCell(SizedBox(
-                    width: tanggalWidth,
-                    child: Row(
-                      children: [
-                        Icon(
-                          unsynced ? Icons.cloud_off : Icons.cloud_done,
-                          size: 14,
-                          color: unsynced ? Colors.red : Colors.green,
+                return DataRow(
+                  cells: [
+                    DataCell(SizedBox(
+                      width: tanggalWidth,
+                      child: Row(
+                        children: [
+                          Icon(
+                            unsynced ? Icons.cloud_off : Icons.cloud_done,
+                            size: 14,
+                            color: unsynced ? Colors.red : Colors.green,
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                                DateFormat("dd/MM/yyyy").format(tanggal)),
+                          ),
+                        ],
+                      ),
+                    )),
+                    DataCell(SizedBox(
+                        width: jenisWidth, child: Text(t['jenis'] ?? ''))),
+                    DataCell(SizedBox(
+                        width: namaPTWidth, child: Text(t['namaPT'] ?? ''))),
+                    DataCell(
+                      SizedBox(
+                        width: deskripsiWidth,
+                        child: Tooltip(
+                          message: t['deskripsi'] ?? '',
+                          child: Text(
+                            t['deskripsi'] ?? '',
+                            softWrap: true,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(DateFormat("dd/MM/yyyy").format(tanggal)),
-                        ),
-                      ],
-                    ),
-                  )),
-                  DataCell(SizedBox(width: jenisWidth, child: Text(t['jenis'] ?? ''))),
-                  DataCell(SizedBox(width: namaPTWidth, child: Text(t['namaPT'] ?? ''))),
-                  DataCell(SizedBox(width: deskripsiWidth, child: Text(t['deskripsi'] ?? ''))),
-                  DataCell(SizedBox(width: noPOWidth, child: Text(t['noPO'] ?? ''))),
-                  DataCell(SizedBox(
-                    width: jumlahWidth,
-                    child: Text(
-                      NumberFormat.currency(locale: 'id', symbol: "Rp ").format(jumlah),
-                      style: TextStyle(
-                        color: isPemasukan ? Colors.green : Colors.red,
-                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  )),
-                  DataCell(SizedBox(
-                    width: invoiceWidth,
-                    child: IconButton(
-                      icon: const Icon(Icons.receipt_long),
-                      tooltip: "Lihat Invoice",
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => InvoicePage(transaksi: t)),
-                        );
-                      },
+                    DataCell(SizedBox(
+                        width: noPOWidth, child: Text(t['noPO'] ?? ''))),
+                    DataCell(SizedBox(
+                      width: jumlahWidth,
+                      child: Text(
+                        NumberFormat.currency(locale: 'id', symbol: "Rp ")
+                            .format(jumlah),
+                        style: TextStyle(
+                          color: isPemasukan ? Colors.green : Colors.red,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    )),
+                    DataCell(
+                      SizedBox(
+                        width: invoiceWidth,
+                        child: Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.receipt_long),
+                              tooltip: "Lihat Invoice",
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (_) =>
+                                          InvoicePage(transaksi: t)),
+                                );
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.blue),
+                              tooltip: "Edit",
+                              onPressed: () {
+                                _showEditDialog(t);
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              tooltip: "Hapus",
+                              onPressed: () async {
+                                final confirm = await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text("Hapus Transaksi"),
+                                    content: const Text(
+                                        "Yakin ingin menghapus transaksi ini?"),
+                                    actions: [
+                                      TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(context, false),
+                                          child: const Text("Batal")),
+                                      ElevatedButton(
+                                          onPressed: () =>
+                                              Navigator.pop(context, true),
+                                          child: const Text("Hapus")),
+                                    ],
+                                  ),
+                                );
+                                if (confirm == true) {
+                                  await KeuanganService.deleteTransaksi(t['id']);
+                                  _showSnack("Transaksi berhasil dihapus");
+                                  setState(() {});
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  )),
-                ],
-              );
-            }).toList(),
+                  ],
+                );
+              }).toList(),
+            ),
           ),
-        ),
-      );
-    },
-  );
-}
-
+        );
+      },
+    );
+  }
 
   // ======================================
   // ADD DIALOG
@@ -790,6 +886,84 @@ class _KeuanganPageState extends State<KeuanganPage> {
                 hargaController.clear();
 
                 if (mounted) Navigator.pop(context);
+              },
+              child: const Text("Simpan"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ======================================
+  // EDIT DIALOG
+  // ======================================
+  void _showEditDialog(Map<String, dynamic> transaksi) {
+    final namaPT = TextEditingController(text: transaksi['namaPT']);
+    final deskripsi = TextEditingController(text: transaksi['deskripsi']);
+    final noPO = TextEditingController(text: transaksi['noPO']);
+    final jumlah = TextEditingController(text: transaksi['jumlah'].toString());
+    String jenis = transaksi['jenis'];
+    DateTime tanggal = transaksi['tanggal'] is DateTime
+        ? transaksi['tanggal']
+        : DateTime.tryParse(transaksi['tanggal'].toString()) ?? DateTime.now();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("Edit Transaksi"),
+          content: SingleChildScrollView(
+            child: Column(
+              children: [
+                DropdownButtonFormField<String>(
+                  value: jenis,
+                  decoration: const InputDecoration(labelText: "Jenis"),
+                  items: const [
+                    DropdownMenuItem(value: "Pemasukan", child: Text("Pemasukan")),
+                    DropdownMenuItem(value: "Pengeluaran", child: Text("Pengeluaran")),
+                  ],
+                  onChanged: (val) => jenis = val!,
+                ),
+                TextField(controller: namaPT, decoration: const InputDecoration(labelText: "Nama PT")),
+                TextField(controller: deskripsi, decoration: const InputDecoration(labelText: "Deskripsi")),
+                TextField(controller: noPO, decoration: const InputDecoration(labelText: "No.PO")),
+                TextField(controller: jumlah, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Jumlah")),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.date_range),
+                  label: Text(DateFormat("dd/MM/yyyy").format(tanggal)),
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: tanggal,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime(2100),
+                    );
+                    if (picked != null) tanggal = picked;
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Batal")),
+            ElevatedButton(
+              onPressed: () async {
+                await KeuanganService.updateTransaksi(
+                  transaksi['id'],
+                  {
+                  'jenis': jenis,
+                  'namaPT': namaPT.text,
+                  'deskripsi': deskripsi.text,
+                  'noPO': noPO.text,
+                  'jumlah': double.tryParse(jumlah.text) ?? 0,
+                  'tanggal': tanggal.toIso8601String(),
+                  'unsynced': true
+                  }
+                );
+                Navigator.pop(context);
+                _showSnack("Transaksi berhasil diperbarui");
+                setState(() {});
               },
               child: const Text("Simpan"),
             ),
